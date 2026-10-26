@@ -3,19 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>Башня чисел: Roguelike Edition</title>
+<title>Башня чисел: Dark Fantasy</title>
 <style>
   * { box-sizing: border-box; }
   html, body {
     width: 100%; height: 100%; margin: 0; overflow: hidden;
-    background: #0a0c12; color: #fff; font-family: system-ui, sans-serif;
+    background: #05070a; color: #fff; font-family: system-ui, sans-serif;
     touch-action: none; user-select: none;
   }
   canvas { display: block; width: 100vw; height: 100dvh; touch-action: none; }
   #rotate {
     display: none; position: fixed; inset: 0; z-index: 10;
     align-items: center; justify-content: center; text-align: center;
-    padding: 28px; background: #101525; color: white;
+    padding: 28px; background: #0a0c12; color: white;
     font-size: 21px; font-weight: 700; line-height: 1.6;
   }
   @media (orientation: portrait) { #rotate { display: flex; } }
@@ -23,7 +23,7 @@
 </head>
 <body>
 <canvas id="game"></canvas>
-<div id="rotate">Поверни устройство горизонтально<br>и отправляйся в подземелье ↻</div>
+<div id="rotate">Поверни устройство горизонтально<br>и спустись в подземелье ↻</div>
 
 <script>
 (() => {
@@ -33,11 +33,9 @@
   const ctx = canvas.getContext("2d", { alpha: false });
 
   const W = 960, H = 600;
-  // Границы комнаты
   const ROOM_X = 80, ROOM_Y = 80, ROOM_W = 800, ROOM_H = 440;
   
   let dpr = 1, scale = 1, offsetX = 0, offsetY = 0;
-  let bgCanvas;
 
   function resize() {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -55,38 +53,24 @@
     };
   }
 
-  // --- Предметы и экипировка ---
   const ITEM_POOL = [
-    { name: "Кровавый глаз", type: "damage", color: "#ff4444", desc: "+1 урон" },
-    { name: "Слеза скорости", type: "tears", color: "#ffff44", desc: "Скорострельность ↑" },
-    { name: "Крылья", type: "speed", color: "#44aaff", desc: "Скорость ↑" },
-    { name: "Дальнобойность", type: "range", color: "#44ff44", desc: "Дальность ↑" },
-    { name: "Стальной клинок", type: "weapon", weapon: "sword", color: "#dddddd", desc: "Ближний бой" },
-    { name: "Костяной лук", type: "weapon", weapon: "bow", color: "#ffcc44", desc: "Пробивные стрелы" },
-    { name: "Сердце", type: "health", color: "#ff44ff", desc: "+1 контейнер здоровья" }
+    { name: "Кровавый рубин", type: "damage", color: "#ff3333", desc: "+1.5 к урону" },
+    { name: "Слеза ведьмы", type: "tears", color: "#ffffaa", desc: "Скорострельность ↑" },
+    { name: "Крылья летучей мыши", type: "speed", color: "#44aaff", desc: "Скорость ↑" },
+    { name: "Глаз провидца", type: "range", color: "#44ff44", desc: "Дальность ↑" },
+    { name: "Клинок Титанов", type: "weapon", weapon: "sword", color: "#00ffff", desc: "Ближний бой" },
+    { name: "Лук Охотника", type: "weapon", weapon: "bow", color: "#ffcc44", desc: "Пробивные стрелы" },
+    { name: "Сердце голема", type: "health", color: "#ff44ff", desc: "+1 контейнер здоровья" }
   ];
 
   const state = {
-    floor: 1,
-    rooms: {},
-    currentRoom: { x: 4, y: 4 },
-    hero: null,
-    enemies: [],
-    tears: [],
-    enemyTears: [],
-    drops: [],
-    particles: [],
-    pedestals: [],
-    kills: 0,
-    gameOver: false,
+    floor: 1, rooms: {}, currentRoom: { x: 4, y: 4 },
+    hero: null, enemies: [], tears: [], enemyTears: [], drops: [], particles: [], pedestals: [],
+    kills: 0, gameOver: false,
     joystick: { active: false, id: null, startX: 0, startY: 0, x: 0, y: 0, dx: 0, dy: 0 },
     rightStick: { active: false, id: null, startX: 0, startY: 0, x: 0, y: 0, dx: 0, dy: 0 },
-    keys: {},
-    shootCooldown: 0,
-    shake: 0,
-    message: "",
-    messageTime: 0,
-    transition: 0
+    keys: {}, shootCooldown: 0, shake: 0, message: "", messageTime: 0,
+    transition: 0, roomCooldown: 0, time: 0
   };
 
   function say(text, duration = 2) {
@@ -94,18 +78,18 @@
     state.messageTime = duration;
   }
 
-  function addParticle(x, y, color, amount, speed) {
+  function addParticle(x, y, color, amount, speed, sizeMax = 4) {
     for (let i = 0; i < amount; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const spd = speed * (0.3 + Math.random() * 0.7);
+      const spd = speed * (0.2 + Math.random() * 0.8);
       state.particles.push({
         x, y, vx: Math.cos(angle) * spd, vy: Math.sin(angle) * spd,
-        life: 0.4 + Math.random() * 0.4, maxLife: 0.8, size: 2 + Math.random() * 4, color
+        life: 0.3 + Math.random() * 0.5, maxLife: 0.8, 
+        size: 1 + Math.random() * sizeMax, color
       });
     }
   }
 
-  // --- Генерация этажа ---
   function generateFloor() {
     state.rooms = {};
     const gridSize = 9;
@@ -134,17 +118,15 @@
       }
     }
     
-    // Поиск самой дальней комнаты для Босса
+    // Поиск босса
     const distances = { "4,4": 0 };
     const bfsQ = [{x: 4, y: 4}];
     let maxDist = 0, bossPos = null;
-    
     while (bfsQ.length > 0) {
       const curr = bfsQ.shift();
       const key = `${curr.x},${curr.y}`;
       if (distances[key] > maxDist && state.rooms[key].type !== 'start') {
-        maxDist = distances[key];
-        bossPos = { x: curr.x, y: curr.y };
+        maxDist = distances[key]; bossPos = { x: curr.x, y: curr.y };
       }
       for (const [dx, dy] of [[0,-1],[0,1],[-1,0],[1,0]]) {
         const nk = `${curr.x+dx},${curr.y+dy}`;
@@ -163,13 +145,8 @@
         if (Math.random() < 0.5) { state.rooms[key].type = 'treasure'; treasureAssigned = true; }
       }
     }
-    if (!treasureAssigned) {
-      for (const key in state.rooms) {
-        if (state.rooms[key].type === 'combat') { state.rooms[key].type = 'treasure'; break; }
-      }
-    }
-
-    // Установка дверей
+    
+    // Двери
     for (const key in state.rooms) {
       const r = state.rooms[key];
       r.doors = { top: false, bottom: false, left: false, right: false };
@@ -190,18 +167,17 @@
     if (!next) return;
     
     state.transition = 0.4;
+    state.roomCooldown = 0.5; // Защита от зависания (пинг-понга)
     state.currentRoom = { x: nx, y: ny };
     next.visited = true;
     
-    if (dx === 1) state.hero.x = ROOM_X + 25;
-    if (dx === -1) state.hero.x = ROOM_X + ROOM_W - 25;
-    if (dy === 1) state.hero.y = ROOM_Y + 25;
-    if (dy === -1) state.hero.y = ROOM_Y + ROOM_H - 25;
+    // Спавн подальше от двери
+    if (dx === 1) state.hero.x = ROOM_X + 60;
+    if (dx === -1) state.hero.x = ROOM_X + ROOM_W - 60;
+    if (dy === 1) state.hero.y = ROOM_Y + 60;
+    if (dy === -1) state.hero.y = ROOM_Y + ROOM_H - 60;
     
-    state.tears = [];
-    state.enemyTears = [];
-    state.particles = [];
-    state.pedestals = [];
+    state.tears = []; state.enemyTears = []; state.particles = []; state.pedestals = [];
     
     if (next.type === 'combat' && !next.cleared) spawnEnemies();
     else if (next.type === 'boss' && !next.cleared) spawnBoss();
@@ -215,11 +191,12 @@
   function spawnEnemies() {
     const count = 2 + Math.floor(Math.random() * 3) + Math.floor(state.floor / 2);
     for (let i = 0; i < count; i++) {
-      let x, y;
+      let x, y, attempts = 0;
       do {
         x = ROOM_X + 60 + Math.random() * (ROOM_W - 120);
         y = ROOM_Y + 60 + Math.random() * (ROOM_H - 120);
-      } while (Math.hypot(x - state.hero.x, y - state.hero.y) < 150);
+        attempts++;
+      } while (Math.hypot(x - state.hero.x, y - state.hero.y) < 180 && attempts < 50); // Защита от вечного цикла
       
       const isFly = Math.random() < 0.4;
       state.enemies.push({
@@ -234,29 +211,26 @@
 
   function spawnBoss() {
     state.enemies.push({
-      x: ROOM_X + ROOM_W/2, y: ROOM_Y + 100, type: 'boss',
-      hp: 120 + state.floor * 50, maxHp: 120 + state.floor * 50,
-      speed: 1.5, size: 40, damage: 2, hit: 0, phase: 0, timer: 0, shootTimer: 2, vx: 0, vy: 0
+      x: ROOM_X + ROOM_W/2, y: ROOM_Y + 120, type: 'boss',
+      hp: 150 + state.floor * 60, maxHp: 150 + state.floor * 60,
+      speed: 1.5, size: 45, damage: 2, hit: 0, phase: 0, timer: 0, shootTimer: 2, vx: 0, vy: 0
     });
   }
 
   function newRun() {
-    state.floor = 1;
-    state.kills = 0;
-    state.gameOver = false;
+    state.floor = 1; state.kills = 0; state.gameOver = false;
     state.hero = {
       x: 0, y: 0, hp: 6, maxHp: 6, speed: 3.5, damage: 3.5, tearDelay: 0.35,
       range: 1.0, shotSpeed: 10, coins: 0, keys: 0, weapon: 'tear',
-      invuln: 0, facing: 0, moving: false, walkTimer: 0
+      invuln: 0, facing: 0, moving: false, walkTimer: 0, capeAngle: 0
     };
     state.enemies = []; state.tears = []; state.enemyTears = [];
     state.drops = []; state.particles = []; state.pedestals = [];
-    state.shootCooldown = 0; state.shake = 0; state.transition = 0;
+    state.shootCooldown = 0; state.shake = 0; state.transition = 0; state.roomCooldown = 0;
     generateFloor();
     say("Найди босса и убей его!");
   }
 
-  // --- Боевая система ---
   function shoot() {
     const h = state.hero;
     if (state.shootCooldown > 0) return;
@@ -282,7 +256,7 @@
         x: h.x + Math.cos(angle) * 30, y: h.y + Math.sin(angle) * 30,
         vx: Math.cos(angle) * 15, vy: Math.sin(angle) * 15,
         damage: h.damage * 2, range: 30, dist: 0, size: 30,
-        color: "#ffffff", isSword: true, life: 0.15
+        color: "#aaffff", isSword: true, life: 0.15
       });
       state.shootCooldown = h.tearDelay * 0.5;
       state.shake = Math.max(state.shake, 4);
@@ -298,8 +272,8 @@
       state.tears.push({
         x: h.x + Math.cos(angle) * 15, y: h.y + Math.sin(angle) * 15,
         vx: Math.cos(angle) * 8 * h.shotSpeed, vy: Math.sin(angle) * 8 * h.shotSpeed,
-        damage: h.damage, range: 60 * h.range, dist: 0, size: 6,
-        color: "#71d9ff", life: 2
+        damage: h.damage, range: 60 * h.range, dist: 0, size: 7,
+        color: "#00ffff", life: 2
       });
       state.shootCooldown = h.tearDelay;
     }
@@ -309,13 +283,13 @@
     e.hp -= dmg;
     e.hit = 0.1;
     state.shake = Math.max(state.shake, 3);
-    addParticle(e.x, e.y, "#ff4444", 5, 100);
+    addParticle(e.x, e.y, "#ff3333", 4, 80, 3);
     
     if (e.hp <= 0) {
       state.kills++;
       const idx = state.enemies.indexOf(e);
       if (idx > -1) state.enemies.splice(idx, 1);
-      addParticle(e.x, e.y, "#aa44ff", 15, 150);
+      addParticle(e.x, e.y, e.type === 'boss' ? "#aa44ff" : "#ff44aa", 20, 150, 5);
       
       if (e.type === 'boss') {
         state.drops.push({ x: e.x, y: e.y, type: 'trapdoor', phase: 0 });
@@ -330,36 +304,36 @@
   function applyItem(item) {
     const h = state.hero;
     if (item.type === 'health') { h.maxHp += 2; h.hp += 2; }
-    else if (item.type === 'damage') h.damage += 1;
-    else if (item.type === 'tears') h.tearDelay *= 0.8;
+    else if (item.type === 'damage') h.damage += 1.5;
+    else if (item.type === 'tears') h.tearDelay *= 0.75;
     else if (item.type === 'speed') h.speed += 0.5;
     else if (item.type === 'range') h.range += 0.5;
     else if (item.type === 'weapon') h.weapon = item.weapon;
     
-    addParticle(h.x, h.y, item.color, 20, 150);
+    addParticle(h.x, h.y, item.color, 30, 180, 6);
     say("Получено: " + item.name, 2.5);
   }
 
-  // --- Обновление логики ---
   function update(dt) {
     if (state.gameOver) return;
+    state.time += dt;
     if (state.transition > 0) { state.transition -= dt * 3; if (state.transition < 0) state.transition = 0; }
     if (state.messageTime > 0) state.messageTime -= dt;
+    if (state.roomCooldown > 0) state.roomCooldown -= dt;
     
-    state.shake = Math.max(0, state.shake - dt * 15);
+    state.shake = Math.max(0, state.shake - dt * 20);
     state.shootCooldown = Math.max(0, state.shootCooldown - dt);
     const h = state.hero;
     h.invuln = Math.max(0, h.invuln - dt);
 
-    // Движение
     let mx = 0, my = 0;
     if (state.joystick.active) {
       mx = state.joystick.dx; my = state.joystick.dy;
     } else {
-      if (state.keys['a']) mx -= 1;
-      if (state.keys['d']) mx += 1;
-      if (state.keys['w']) my -= 1;
-      if (state.keys['s']) my += 1;
+      if (state.keys['a'] || state.keys['arrowleft']) mx -= 1;
+      if (state.keys['d'] || state.keys['arrowright']) mx += 1;
+      if (state.keys['w'] || state.keys['arrowup']) my -= 1;
+      if (state.keys['s'] || state.keys['arrowdown']) my += 1;
     }
     
     const len = Math.hypot(mx, my);
@@ -369,28 +343,28 @@
       h.y += my * h.speed * 60 * dt;
       h.walkTimer += dt * 15;
       h.moving = true;
+      h.capeAngle = Math.atan2(my, mx) + Math.PI; // Плащ развевается
     } else {
       h.moving = false;
     }
 
-    // Стрельба
     let shooting = false;
     if (state.rightStick.active) shooting = Math.hypot(state.rightStick.dx, state.rightStick.dy) > 0.3;
     else if (state.keys[' ']) shooting = true;
     if (shooting && state.shootCooldown <= 0) shoot();
 
-    // Коллизии со стенами и дверями
     const room = state.rooms[`${state.currentRoom.x},${state.currentRoom.y}`];
-    if (room.cleared) {
-      if (room.doors.top && h.y < ROOM_Y + 20 && Math.abs(h.x - (ROOM_X + ROOM_W/2)) < 40) { changeRoom(0, -1); return; }
-      if (room.doors.bottom && h.y > ROOM_Y + ROOM_H - 20 && Math.abs(h.x - (ROOM_X + ROOM_W/2)) < 40) { changeRoom(0, 1); return; }
-      if (room.doors.left && h.x < ROOM_X + 20 && Math.abs(h.y - (ROOM_Y + ROOM_H/2)) < 40) { changeRoom(-1, 0); return; }
-      if (room.doors.right && h.x > ROOM_X + ROOM_W - 20 && Math.abs(h.y - (ROOM_Y + ROOM_H/2)) < 40) { changeRoom(1, 0); return; }
+    
+    // Проверка дверей с кулдауном
+    if (room.cleared && state.roomCooldown <= 0) {
+      if (room.doors.top && h.y < ROOM_Y + 25 && Math.abs(h.x - (ROOM_X + ROOM_W/2)) < 40) { changeRoom(0, -1); return; }
+      if (room.doors.bottom && h.y > ROOM_Y + ROOM_H - 25 && Math.abs(h.x - (ROOM_X + ROOM_W/2)) < 40) { changeRoom(0, 1); return; }
+      if (room.doors.left && h.x < ROOM_X + 25 && Math.abs(h.y - (ROOM_Y + ROOM_H/2)) < 40) { changeRoom(-1, 0); return; }
+      if (room.doors.right && h.x > ROOM_X + ROOM_W - 25 && Math.abs(h.y - (ROOM_Y + ROOM_H/2)) < 40) { changeRoom(1, 0); return; }
     }
-    h.x = Math.max(ROOM_X + 15, Math.min(ROOM_X + ROOM_W - 15, h.x));
-    h.y = Math.max(ROOM_Y + 15, Math.min(ROOM_Y + ROOM_H - 15, h.y));
+    h.x = Math.max(ROOM_X + 20, Math.min(ROOM_X + ROOM_W - 20, h.x));
+    h.y = Math.max(ROOM_Y + 20, Math.min(ROOM_Y + ROOM_H - 20, h.y));
 
-    // Враги
     for (let i = state.enemies.length - 1; i >= 0; i--) {
       const e = state.enemies[i];
       e.phase += dt * 5;
@@ -401,45 +375,43 @@
         if (e.timer > 1) {
           e.timer = 0;
           const ang = Math.atan2(h.y - e.y, h.x - e.x);
-          e.vx = Math.cos(ang) * 150; e.vy = Math.sin(ang) * 150;
+          e.vx = Math.cos(ang) * 180; e.vy = Math.sin(ang) * 180;
         }
         e.x += e.vx * dt; e.y += e.vy * dt;
-        e.vx *= 0.92; e.vy *= 0.92;
+        e.vx *= 0.9; e.vy *= 0.9;
       } else if (e.type === 'fly') {
         const ang = Math.atan2(h.y - e.y, h.x - e.x);
-        e.x += Math.cos(ang + Math.sin(e.phase)*0.5) * e.speed * 60 * dt;
-        e.y += Math.sin(ang + Math.sin(e.phase)*0.5) * e.speed * 60 * dt;
+        e.x += Math.cos(ang + Math.sin(e.phase)*0.8) * e.speed * 60 * dt;
+        e.y += Math.sin(ang + Math.sin(e.phase)*0.8) * e.speed * 60 * dt;
       } else if (e.type === 'boss') {
         const ang = Math.atan2(h.y - e.y, h.x - e.x);
-        if (Math.hypot(h.x - e.x, h.y - e.y) > 150) {
+        if (Math.hypot(h.x - e.x, h.y - e.y) > 160) {
           e.x += Math.cos(ang) * e.speed * 60 * dt;
           e.y += Math.sin(ang) * e.speed * 60 * dt;
         }
         e.shootTimer -= dt;
         if (e.shootTimer <= 0) {
-          e.shootTimer = 1.8;
+          e.shootTimer = 1.6;
           for (let a = -1; a <= 1; a++) {
             state.enemyTears.push({
-              x: e.x, y: e.y, vx: Math.cos(ang + a * 0.3) * 4, vy: Math.sin(ang + a * 0.3) * 4,
-              damage: 1, life: 3, size: 8, color: "#ff44aa"
+              x: e.x, y: e.y, vx: Math.cos(ang + a * 0.35) * 5, vy: Math.sin(ang + a * 0.35) * 5,
+              damage: 1, life: 3, size: 9, color: "#ff00aa"
             });
           }
         }
       }
 
-      // Урон игроку
       if (Math.hypot(h.x - e.x, h.y - e.y) < 18 + e.size && h.invuln <= 0) {
         h.hp -= e.damage;
         h.invuln = 1.0;
-        state.shake = 10;
-        addParticle(h.x, h.y, "#ff0000", 10, 150);
+        state.shake = 12;
+        addParticle(h.x, h.y, "#ff0000", 15, 180, 4);
         const kbAng = Math.atan2(h.y - e.y, h.x - e.x);
         h.x += Math.cos(kbAng) * 40; h.y += Math.sin(kbAng) * 40;
         if (h.hp <= 0) { h.hp = 0; state.gameOver = true; }
       }
     }
 
-    // Снаряды игрока
     for (let i = state.tears.length - 1; i >= 0; i--) {
       const t = state.tears[i];
       t.x += t.vx * 60 * dt; t.y += t.vy * 60 * dt;
@@ -458,7 +430,6 @@
       }
     }
 
-    // Снаряды врагов
     for (let i = state.enemyTears.length - 1; i >= 0; i--) {
       const t = state.enemyTears[i];
       t.x += t.vx * 60 * dt; t.y += t.vy * 60 * dt; t.life -= dt;
@@ -474,7 +445,6 @@
       }
     }
 
-    // Дропы и предметы
     for (let i = state.drops.length - 1; i >= 0; i--) {
       const d = state.drops[i];
       d.phase += dt * 3;
@@ -508,122 +478,186 @@
       if (p.life <= 0) state.particles.splice(i, 1);
     }
 
-    // Проверка зачистки
     if (state.enemies.length === 0 && !room.cleared && room.type !== 'start') {
       room.cleared = true;
-      addParticle(ROOM_X + ROOM_W/2, ROOM_Y + ROOM_H/2, "#ffffff", 20, 80);
+      addParticle(ROOM_X + ROOM_W/2, ROOM_Y + ROOM_H/2, "#ffffff", 30, 100, 5);
     }
   }
 
-  // --- Отрисовка ---
+  // --- ГРАФИКА ---
   function drawRoomBg() {
     // Стены
-    ctx.fillStyle = "#0f111a";
-    ctx.fillRect(ROOM_X - 20, ROOM_Y - 20, ROOM_W + 40, ROOM_H + 40);
-    // Пол
-    ctx.fillStyle = "#222533";
+    ctx.fillStyle = "#13161f";
+    ctx.fillRect(ROOM_X - 30, ROOM_Y - 30, ROOM_W + 60, ROOM_H + 60);
+    
+    // Пол (плитка)
+    ctx.fillStyle = "#1e222d";
     ctx.fillRect(ROOM_X, ROOM_Y, ROOM_W, ROOM_H);
-    for (let x = ROOM_X; x < ROOM_X + ROOM_W; x += 40) {
-      for (let y = ROOM_Y; y < ROOM_Y + ROOM_H; y += 40) {
-        if ((x/40 + y/40) % 2 === 0) { ctx.fillStyle = "#1d202c"; ctx.fillRect(x, y, 40, 40); }
-      }
+    ctx.strokeStyle = "#141720";
+    ctx.lineWidth = 2;
+    for (let x = ROOM_X; x <= ROOM_X + ROOM_W; x += 50) {
+      ctx.beginPath(); ctx.moveTo(x, ROOM_Y); ctx.lineTo(x, ROOM_Y + ROOM_H); ctx.stroke();
     }
+    for (let y = ROOM_Y; y <= ROOM_Y + ROOM_H; y += 50) {
+      ctx.beginPath(); ctx.moveTo(ROOM_X, y); ctx.lineTo(ROOM_X + ROOM_W, y); ctx.stroke();
+    }
+
+    // Свет по центру
+    const grad = ctx.createRadialGradient(ROOM_X + ROOM_W/2, ROOM_Y + ROOM_H/2, 50, ROOM_X + ROOM_W/2, ROOM_Y + ROOM_H/2, 400);
+    grad.addColorStop(0, "rgba(255, 255, 255, 0.05)");
+    grad.addColorStop(1, "rgba(0, 0, 0, 0.4)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(ROOM_X, ROOM_Y, ROOM_W, ROOM_H);
+
+    // Факелы по углам
+    const drawTorch = (x, y) => {
+      const tGrad = ctx.createRadialGradient(x, y, 5, x, y, 150);
+      tGrad.addColorStop(0, "rgba(255, 180, 50, 0.4)");
+      tGrad.addColorStop(1, "rgba(255, 180, 50, 0)");
+      ctx.fillStyle = tGrad;
+      ctx.fillRect(x - 150, y - 150, 300, 300);
+      
+      ctx.fillStyle = "#333"; ctx.fillRect(x - 3, y - 5, 6, 15);
+      ctx.fillStyle = "#ffaa00"; ctx.beginPath(); ctx.arc(x, y, 6 + Math.sin(state.time*10)*2, 0, Math.PI*2); ctx.fill();
+    };
+    drawTorch(ROOM_X + 10, ROOM_Y + 10);
+    drawTorch(ROOM_X + ROOM_W - 10, ROOM_Y + 10);
+    drawTorch(ROOM_X + 10, ROOM_Y + ROOM_H - 10);
+    drawTorch(ROOM_X + ROOM_W - 10, ROOM_Y + ROOM_H - 10);
+
     // Двери
     const r = state.rooms[`${state.currentRoom.x},${state.currentRoom.y}`];
-    const drawDoor = (x, y, w, h, open) => {
-      ctx.fillStyle = open ? "#3a4a5a" : "#0f111a";
+    const drawDoor = (x, y, w, h, open, dir) => {
+      ctx.fillStyle = open ? "#2a3441" : "#0f111a";
       ctx.fillRect(x - w/2, y - h/2, w, h);
-      if (open) { ctx.strokeStyle = "#88ccff"; ctx.lineWidth = 2; ctx.strokeRect(x - w/2, y - h/2, w, h); }
+      if (open) {
+        ctx.strokeStyle = "#4a7a9a"; ctx.lineWidth = 2;
+        ctx.strokeRect(x - w/2, y - h/2, w, h);
+        // Стрелочка
+        ctx.fillStyle = "#88ccff";
+        ctx.beginPath();
+        if (dir === 'top') { ctx.moveTo(x, y+5); ctx.lineTo(x-5, y-5); ctx.lineTo(x+5, y-5); }
+        if (dir === 'bottom') { ctx.moveTo(x, y-5); ctx.lineTo(x-5, y+5); ctx.lineTo(x+5, y+5); }
+        if (dir === 'left') { ctx.moveTo(x+5, y); ctx.lineTo(x-5, y-5); ctx.lineTo(x-5, y+5); }
+        if (dir === 'right') { ctx.moveTo(x-5, y); ctx.lineTo(x+5, y-5); ctx.lineTo(x+5, y+5); }
+        ctx.fill();
+      }
     };
-    if (r.doors.top) drawDoor(ROOM_X + ROOM_W/2, ROOM_Y, 80, 20, r.cleared);
-    if (r.doors.bottom) drawDoor(ROOM_X + ROOM_W/2, ROOM_Y + ROOM_H, 80, 20, r.cleared);
-    if (r.doors.left) drawDoor(ROOM_X, ROOM_Y + ROOM_H/2, 20, 80, r.cleared);
-    if (r.doors.right) drawDoor(ROOM_X + ROOM_W, ROOM_Y + ROOM_H/2, 20, 80, r.cleared);
+    if (r.doors.top) drawDoor(ROOM_X + ROOM_W/2, ROOM_Y, 80, 15, r.cleared, 'top');
+    if (r.doors.bottom) drawDoor(ROOM_X + ROOM_W/2, ROOM_Y + ROOM_H, 80, 15, r.cleared, 'bottom');
+    if (r.doors.left) drawDoor(ROOM_X, ROOM_Y + ROOM_H/2, 15, 80, r.cleared, 'left');
+    if (r.doors.right) drawDoor(ROOM_X + ROOM_W, ROOM_Y + ROOM_H/2, 15, 80, r.cleared, 'right');
   }
 
   function drawHero() {
     const h = state.hero;
     const flicker = h.invuln > 0 && Math.floor(performance.now() / 80) % 2 === 0;
     
-    // Тень
-    ctx.fillStyle = "#00000066";
-    ctx.beginPath(); ctx.ellipse(h.x, h.y + 16, 14, 6, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#00000088";
+    ctx.beginPath(); ctx.ellipse(h.x, h.y + 18, 16, 8, 0, 0, Math.PI * 2); ctx.fill();
 
-    if (flicker) ctx.globalAlpha = 0.5;
+    if (flicker) ctx.globalAlpha = 0.4;
 
-    let bob = h.moving ? Math.sin(h.walkTimer) * 2 : 0;
+    const bob = h.moving ? Math.sin(h.walkTimer) * 3 : 0;
     
-    // Ноги
-    ctx.fillStyle = "#f0d5c1";
-    const fo = h.moving ? Math.sin(h.walkTimer) * 4 : 0;
+    // Плащ (сзади)
+    ctx.fillStyle = "#2b3a5a";
     ctx.beginPath();
-    ctx.ellipse(h.x - 5, h.y + 10 + fo, 4, 6, 0, 0, Math.PI * 2);
-    ctx.ellipse(h.x + 5, h.y + 10 - fo, 4, 6, 0, 0, Math.PI * 2);
+    ctx.moveTo(h.x - 12, h.y - 10);
+    ctx.quadraticCurveTo(h.x + Math.cos(h.capeAngle)*20, h.y + Math.sin(h.capeAngle)*20, h.x + 12, h.y - 10);
     ctx.fill();
 
     // Тело
-    ctx.beginPath(); ctx.ellipse(h.x, h.y + 2 + bob, 10, 12, 0, 0, Math.PI * 2); ctx.fill();
-    // Голова
-    ctx.beginPath(); ctx.arc(h.x, h.y - 12 + bob, 14, 0, Math.PI * 2); ctx.fill();
-
-    // Глаза
-    ctx.fillStyle = "#000";
-    const lookX = Math.cos(h.facing) * 2, lookY = Math.sin(h.facing) * 2;
+    ctx.fillStyle = "#3a4b6e";
+    ctx.beginPath(); ctx.ellipse(h.x, h.y + 5 + bob, 12, 15, 0, 0, Math.PI * 2); ctx.fill();
+    
+    // Голова (капюшон)
+    ctx.fillStyle = "#1e2638";
+    ctx.beginPath(); ctx.arc(h.x, h.y - 10 + bob, 14, 0, Math.PI * 2); ctx.fill();
+    
+    // Глаза (светятся)
+    ctx.fillStyle = "#00ffff";
+    ctx.shadowColor = "#00ffff";
+    ctx.shadowBlur = 10;
     ctx.beginPath();
-    ctx.arc(h.x - 4 + lookX, h.y - 14 + bob + lookY, 2, 0, Math.PI * 2);
-    ctx.arc(h.x + 4 + lookX, h.y - 14 + bob + lookY, 2, 0, Math.PI * 2);
+    ctx.arc(h.x - 5, h.y - 12 + bob, 2.5, 0, Math.PI * 2);
+    ctx.arc(h.x + 5, h.y - 12 + bob, 2.5, 0, Math.PI * 2);
     ctx.fill();
+    ctx.shadowBlur = 0;
 
     // Оружие
     ctx.save();
     ctx.translate(h.x, h.y - 5 + bob); ctx.rotate(h.facing);
+    
     if (h.weapon === 'sword') {
-      ctx.fillStyle = "#ddd"; ctx.fillRect(10, -3, 20, 6);
-      ctx.fillStyle = "#aa8844"; ctx.fillRect(6, -5, 4, 10);
+      ctx.shadowColor = "#00ffff"; ctx.shadowBlur = 15;
+      ctx.fillStyle = "#aaffff"; ctx.fillRect(12, -4, 25, 8);
+      ctx.fillStyle = "#555"; ctx.fillRect(8, -6, 4, 12);
     } else if (h.weapon === 'bow') {
-      ctx.strokeStyle = "#ffcc44"; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(15, 0, 10, -Math.PI/2, Math.PI/2); ctx.stroke();
+      ctx.shadowColor = "#ffcc44"; ctx.shadowBlur = 10;
+      ctx.strokeStyle = "#ffcc44"; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(15, 0, 15, -Math.PI/2, Math.PI/2); ctx.stroke();
     }
+    ctx.shadowBlur = 0;
     ctx.restore();
 
     ctx.globalAlpha = 1;
   }
 
   function drawEnemy(e) {
-    ctx.fillStyle = "#00000066";
+    ctx.fillStyle = "#00000088";
     ctx.beginPath(); ctx.ellipse(e.x, e.y + e.size/2 + 5, e.size, e.size/2, 0, 0, Math.PI * 2); ctx.fill();
 
     if (e.type === 'slime') {
-      const squash = Math.sin(e.phase * 2) * 0.2 + 1;
-      ctx.fillStyle = e.hit > 0 ? "#fff" : "#44dd44";
+      const squash = Math.sin(e.phase * 2) * 0.15 + 1;
+      const grad = ctx.createRadialGradient(e.x-5, e.y-5, 2, e.x, e.y, e.size);
+      grad.addColorStop(0, e.hit > 0 ? "#ffffff" : "#88ff88");
+      grad.addColorStop(1, e.hit > 0 ? "#aaaaaa" : "#228822");
+      
+      ctx.fillStyle = grad;
       ctx.beginPath(); ctx.ellipse(e.x, e.y, e.size, e.size * squash, 0, 0, Math.PI * 2); ctx.fill();
+      
       ctx.fillStyle = "#000";
-      ctx.beginPath(); ctx.arc(e.x - 5, e.y - 5, 2, 0, Math.PI * 2); ctx.arc(e.x + 5, e.y - 5, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(e.x - 6, e.y - 4, 2.5, 0, Math.PI * 2); ctx.arc(e.x + 6, e.y - 4, 2.5, 0, Math.PI * 2); ctx.fill();
     } else if (e.type === 'fly') {
-      const wing = Math.sin(e.phase * 10) * 5;
-      ctx.fillStyle = e.hit > 0 ? "#fff" : "#ff4444";
+      const wing = Math.sin(e.phase * 15) * 8;
+      ctx.fillStyle = e.hit > 0 ? "#fff" : "#ff3333";
       ctx.beginPath(); ctx.arc(e.x, e.y, e.size, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#ffffff88";
+      
+      ctx.fillStyle = "rgba(200, 200, 255, 0.6)";
       ctx.beginPath();
-      ctx.ellipse(e.x - 10, e.y - 10, 8, wing, -0.5, 0, Math.PI * 2);
-      ctx.ellipse(e.x + 10, e.y - 10, 8, wing, 0.5, 0, Math.PI * 2);
+      ctx.ellipse(e.x - 10, e.y - 10, 10, wing, -0.5, 0, Math.PI * 2);
+      ctx.ellipse(e.x + 10, e.y - 10, 10, wing, 0.5, 0, Math.PI * 2);
       ctx.fill();
     } else if (e.type === 'boss') {
-      ctx.fillStyle = e.hit > 0 ? "#fff" : "#aa44ff";
+      // Аура
+      ctx.shadowColor = "#ff00aa"; ctx.shadowBlur = 30;
+      
+      const grad = ctx.createRadialGradient(e.x, e.y, 10, e.x, e.y, e.size);
+      grad.addColorStop(0, e.hit > 0 ? "#fff" : "#cc44ff");
+      grad.addColorStop(1, "#440066");
+      
+      ctx.fillStyle = grad;
       ctx.beginPath(); ctx.arc(e.x, e.y, e.size, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+      
+      // Рога
       ctx.fillStyle = "#ffcc44";
       ctx.beginPath();
-      ctx.moveTo(e.x - 20, e.y - 20); ctx.lineTo(e.x - 30, e.y - 50); ctx.lineTo(e.x - 10, e.y - 30);
-      ctx.moveTo(e.x + 20, e.y - 20); ctx.lineTo(e.x + 30, e.y - 50); ctx.lineTo(e.x + 10, e.y - 30);
+      ctx.moveTo(e.x - 20, e.y - 25); ctx.lineTo(e.x - 40, e.y - 60); ctx.lineTo(e.x - 10, e.y - 40);
+      ctx.moveTo(e.x + 20, e.y - 25); ctx.lineTo(e.x + 40, e.y - 60); ctx.lineTo(e.x + 10, e.y - 40);
       ctx.fill();
+      
+      // Глаза
       ctx.fillStyle = "#fff";
-      ctx.beginPath(); ctx.arc(e.x - 15, e.y - 10, 6, 0, Math.PI * 2); ctx.arc(e.x + 15, e.y - 10, 6, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#000";
+      ctx.beginPath(); ctx.arc(e.x - 15, e.y - 10, 7, 0, Math.PI * 2); ctx.arc(e.x + 15, e.y - 10, 7, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#ff0000";
       ctx.beginPath(); ctx.arc(e.x - 15, e.y - 10, 3, 0, Math.PI * 2); ctx.arc(e.x + 15, e.y - 10, 3, 0, Math.PI * 2); ctx.fill();
     }
   }
 
-  function drawHeart(x, y, size) {
+  function drawHeart(x, y, size, color) {
+    ctx.fillStyle = color;
     ctx.beginPath();
     ctx.moveTo(x, y + size * 0.3);
     ctx.bezierCurveTo(x, y, x - size, y, x - size, y + size * 0.3);
@@ -637,69 +671,78 @@
     // Сердца
     let maxHearts = Math.ceil(state.hero.maxHp / 2), chp = state.hero.hp;
     for (let i = 0; i < maxHearts; i++) {
-      const hx = 40 + (i % 6) * 30, hy = 40 + Math.floor(i / 6) * 30;
-      ctx.fillStyle = "#333"; drawHeart(hx, hy, 10);
-      if (chp >= 2) { ctx.fillStyle = "#ff4444"; drawHeart(hx, hy, 10); }
+      const hx = 40 + (i % 6) * 35, hy = 40 + Math.floor(i / 6) * 35;
+      drawHeart(hx, hy, 12, "#331111"); // Пустое
+      if (chp >= 2) drawHeart(hx, hy, 12, "#ff3333");
       else if (chp === 1) {
         ctx.save(); ctx.beginPath(); ctx.rect(hx - 15, hy - 15, 15, 30); ctx.clip();
-        ctx.fillStyle = "#ff4444"; drawHeart(hx, hy, 10); ctx.restore();
+        drawHeart(hx, hy, 12, "#ff3333"); ctx.restore();
       }
       chp -= 2; if (chp < 0) chp = 0;
     }
     
     // Монеты и Этаж
-    ctx.font = "bold 16px system-ui"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
-    ctx.fillStyle = "#ffdd44"; ctx.fillText("🪙 " + state.hero.coins, W - 200, 40);
-    ctx.fillStyle = "#ffffff"; ctx.fillText("ЭТАЖ " + state.floor, W - 200, 70);
+    ctx.font = "bold 18px system-ui"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "#ffdd44"; ctx.fillText("🪙 " + state.hero.coins, W - 180, 40);
+    ctx.fillStyle = "#fff"; ctx.fillText("ЭТАЖ " + state.floor, W - 180, 70);
 
     // Миникарта
-    const size = 12, startX = W - 160, startY = 100;
-    ctx.fillStyle = "#00000088"; ctx.fillRect(startX - 10, startY - 10, 140, 110);
+    const size = 14, startX = W - 140, startY = 110;
+    ctx.fillStyle = "rgba(0, 0, 0, 0.6)"; 
+    ctx.beginPath(); ctx.roundRect(startX - 15, startY - 15, 120, 100, 10); ctx.fill();
+    
     for (const key in state.rooms) {
       const room = state.rooms[key];
       if (!room.visited) continue;
-      const rx = startX + (room.x - state.currentRoom.x) * size + 60;
-      const ry = startY + (room.y - state.currentRoom.y) * size + 50;
-      if (rx < startX || rx > startX + 120 || ry < startY || ry > startY + 90) continue;
+      const rx = startX + (room.x - state.currentRoom.x) * size + 45;
+      const ry = startY + (room.y - state.currentRoom.y) * size + 35;
+      if (rx < startX || rx > startX + 90 || ry < startY || ry > startY + 70) continue;
       
       if (room.x === state.currentRoom.x && room.y === state.currentRoom.y) ctx.fillStyle = "#fff";
-      else if (room.type === 'boss') ctx.fillStyle = "#ff4444";
+      else if (room.type === 'boss') ctx.fillStyle = "#ff3333";
       else if (room.type === 'treasure') ctx.fillStyle = "#ffff44";
-      else if (room.cleared) ctx.fillStyle = "#aaa";
-      else ctx.fillStyle = "#555";
-      ctx.fillRect(rx, ry, size - 2, size - 2);
+      else if (room.cleared) ctx.fillStyle = "#556677";
+      else ctx.fillStyle = "#334455";
+      
+      ctx.fillRect(rx, ry, size - 3, size - 3);
     }
 
-    // Полоса здоровья Босса
+    // Полоса Босса
     if (state.currentRoom && state.rooms[`${state.currentRoom.x},${state.currentRoom.y}`].type === 'boss') {
       const boss = state.enemies.find(e => e.type === 'boss');
       if (boss) {
-        ctx.fillStyle = "#000000aa"; ctx.fillRect(W/2 - 200, H - 30, 400, 16);
-        ctx.fillStyle = "#ff44aa"; ctx.fillRect(W/2 - 198, H - 28, 396 * (boss.hp / boss.maxHp), 12);
+        ctx.fillStyle = "rgba(0, 0, 0, 0.8)"; ctx.fillRect(W/2 - 200, H - 40, 400, 20);
+        ctx.fillStyle = "#ff00aa"; ctx.fillRect(W/2 - 198, H - 38, 396 * Math.max(0, boss.hp / boss.maxHp), 16);
+        ctx.fillStyle = "#fff"; ctx.font = "14px system-ui"; ctx.textAlign = "center";
+        ctx.fillText("ВЛАДЫКА ПОДЗЕМЕЛЬЯ", W/2, H - 52);
       }
     }
 
     // Стики
     const drawStick = (baseX, baseY, stick, color) => {
-      ctx.fillStyle = "#ffffff22"; ctx.beginPath(); ctx.arc(baseX, baseY, 60, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(255, 255, 255, 0.1)"; 
+      ctx.beginPath(); ctx.arc(baseX, baseY, 60, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.2)"; ctx.lineWidth = 2; ctx.stroke();
+      
       let sx = baseX, sy = baseY;
       if (stick.active) { sx = stick.x; sy = stick.y; }
       ctx.fillStyle = color; ctx.beginPath(); ctx.arc(sx, sy, 25, 0, Math.PI * 2); ctx.fill();
     };
-    drawStick(100, H - 100, state.joystick, "#ffffff88");
-    drawStick(W - 100, H - 100, state.rightStick, "#ffcccc88");
+    drawStick(110, H - 110, state.joystick, "rgba(255, 255, 255, 0.6)");
+    drawStick(W - 110, H - 110, state.rightStick, "rgba(255, 100, 100, 0.6)");
 
     // Сообщение
     if (state.messageTime > 0) {
-      ctx.fillStyle = "#000000cc"; ctx.fillRect(W/2 - 200, H - 60, 400, 30);
+      ctx.fillStyle = "rgba(0, 0, 0, 0.8)"; 
+      ctx.beginPath(); ctx.roundRect(W/2 - 200, H - 70, 400, 35, 10); ctx.fill();
       ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = "bold 16px system-ui";
-      ctx.fillText(state.message, W/2, H - 45);
+      ctx.fillText(state.message, W/2, H - 47);
     }
   }
 
   function draw() {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = "#0a0c12";
+    ctx.fillStyle = "#05070a";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
 
@@ -712,51 +755,64 @@
 
     // Дропы
     for (const d of state.drops) {
-      const bob = Math.sin(d.phase) * 5;
+      const bob = Math.sin(d.phase + state.time*2) * 5;
       if (d.type === 'trapdoor') {
-        ctx.fillStyle = "#111"; ctx.beginPath(); ctx.ellipse(d.x, d.y, 30, 15, 0, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = "#aa44ff"; ctx.lineWidth = 3; ctx.stroke();
+        ctx.fillStyle = "#000"; ctx.beginPath(); ctx.ellipse(d.x, d.y, 35, 20, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "#aa44ff"; ctx.lineWidth = 4; ctx.shadowColor = "#aa44ff"; ctx.shadowBlur = 15; ctx.stroke();
+        ctx.shadowBlur = 0;
       } else if (d.type === 'coin') {
-        ctx.fillStyle = "#ffdd44"; ctx.beginPath(); ctx.arc(d.x, d.y + bob, 10, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#ffdd44"; ctx.shadowColor = "#ffdd44"; ctx.shadowBlur = 10;
+        ctx.beginPath(); ctx.arc(d.x, d.y + bob, 10, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowBlur = 0;
       } else if (d.type === 'heart') {
-        ctx.fillStyle = "#ff4444"; drawHeart(d.x, d.y + bob - 10, 10);
+        drawHeart(d.x, d.y + bob - 10, 12, "#ff3333");
       }
     }
 
     // Пьедесталы
     for (const p of state.pedestals) {
-      ctx.fillStyle = "#444"; ctx.beginPath(); ctx.ellipse(p.x, p.y + 15, 25, 12, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#666"; ctx.fillRect(p.x - 10, p.y - 5, 20, 20);
-      const bob = Math.sin(performance.now() / 500) * 5;
-      ctx.fillStyle = p.item.color + "44"; ctx.beginPath(); ctx.arc(p.x, p.y - 20 + bob, 25, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = p.item.color; ctx.beginPath(); ctx.arc(p.x, p.y - 20 + bob, 15, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#222"; ctx.beginPath(); ctx.ellipse(p.x, p.y + 15, 30, 15, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#444"; ctx.fillRect(p.x - 12, p.y - 10, 24, 25);
+      
+      const bob = Math.sin(state.time * 3) * 8;
+      ctx.shadowColor = p.item.color; ctx.shadowBlur = 20;
+      ctx.fillStyle = p.item.color; 
+      ctx.beginPath(); ctx.arc(p.x, p.y - 25 + bob, 15, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
     }
 
     for (const e of state.enemies) drawEnemy(e);
 
     // Снаряды
     for (const t of state.tears) {
+      ctx.shadowColor = t.color; ctx.shadowBlur = 10;
       ctx.fillStyle = t.color; ctx.beginPath(); ctx.arc(t.x, t.y, t.size, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+      
+      // Хвост
       if (!t.isSword) {
-        ctx.fillStyle = "#ffffff88"; ctx.beginPath(); ctx.arc(t.x - t.size/3, t.y - t.size/3, t.size/3, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = t.color + "44";
+        ctx.beginPath(); ctx.ellipse(t.x - t.vx*0.5, t.y - t.vy*0.5, t.size*1.5, t.size*0.8, Math.atan2(t.vy, t.vx), 0, Math.PI * 2); ctx.fill();
       }
     }
     for (const t of state.enemyTears) {
+      ctx.shadowColor = t.color; ctx.shadowBlur = 15;
       ctx.fillStyle = t.color; ctx.beginPath(); ctx.arc(t.x, t.y, t.size, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
     }
 
     drawHero();
 
     // Частицы
     for (const p of state.particles) {
-      ctx.globalAlpha = p.life / p.maxLife;
-      ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+      ctx.fillStyle = p.color; 
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
     }
     ctx.globalAlpha = 1;
 
     ctx.restore();
 
-    // Интерфейс поверх всего
     drawUI();
 
     if (state.transition > 0) {
@@ -765,16 +821,16 @@
     }
 
     if (state.gameOver) {
-      ctx.fillStyle = "#000000cc"; ctx.fillRect(0, 0, W, H);
-      ctx.fillStyle = "#ff4444"; ctx.font = "bold 40px system-ui"; ctx.textAlign = "center";
+      ctx.fillStyle = "rgba(20, 0, 0, 0.9)"; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "#ff3333"; ctx.font = "bold 50px system-ui"; ctx.textAlign = "center";
       ctx.fillText("ВЫ ПОГИБЛИ", W/2, H/2 - 20);
       ctx.fillStyle = "#fff"; ctx.font = "20px system-ui";
-      ctx.fillText("Этаж " + state.floor + " | Убито врагов: " + state.kills, W/2, H/2 + 30);
-      ctx.fillStyle = "#aaa"; ctx.fillText("Нажмите, чтобы начать заново", W/2, H/2 + 80);
+      ctx.fillText("Этаж " + state.floor + " | Убито врагов: " + state.kills, W/2, H/2 + 40);
+      ctx.fillStyle = "#aaa"; ctx.fillText("Нажмите, чтобы начать заново", W/2, H/2 + 90);
     }
   }
 
-  // --- Ввод ---
+  // Ввод
   function pointerDown(e) {
     e.preventDefault();
     if (state.gameOver) { newRun(); return; }
