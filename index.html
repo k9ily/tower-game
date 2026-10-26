@@ -1,0 +1,986 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<!-- ПРАВКА 1: добавлен viewport-fit=cover -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Башня чисел: Бесконечный поход</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%; margin: 0; overflow: hidden;
+    background: #111626; color: #fff; font-family: system-ui, sans-serif;
+    touch-action: none; user-select: none;
+  }
+  canvas { display: block; width: 100vw; height: 100dvh; touch-action: none; }
+  #rotate {
+    display: none; position: fixed; inset: 0; z-index: 10;
+    align-items: center; justify-content: center; text-align: center;
+    padding: 28px; background: #101525; color: white;
+    font-size: 21px; font-weight: 700; line-height: 1.6;
+  }
+  @media (orientation: portrait) { #rotate { display: flex; } }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="rotate">Поверни устройство горизонтально<br>и отправляйся в Башню чисел ↻</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const canvas = document.querySelector("#game");
+  const ctx = canvas.getContext("2d", { alpha: false });
+
+  const W = 960, H = 600;
+  let dpr = 1, scale = 1, offsetX = 0, offsetY = 0;
+  let bgCanvas, bgCtx;
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(innerWidth * dpr);
+    canvas.height = Math.round(innerHeight * dpr);
+    scale = Math.min(canvas.width / W, canvas.height / H);
+    offsetX = (canvas.width - W * scale) / 2;
+    offsetY = (canvas.height - H * scale) / 2;
+    makeBackground();
+  }
+
+  function pointFromEvent(e) {
+    return {
+      x: (e.clientX * dpr - offsetX) / scale,
+      y: (e.clientY * dpr - offsetY) / scale
+    };
+  }
+
+  const weaponTypes = {
+    sword: {
+      name: "Клинок", icon: "⚔", color: "#71d9ff",
+      damage: 3, range: 73, cooldown: 0.40, kind: "melee",
+      description: "Надёжный сбалансированный клинок."
+    },
+    spear: {
+      name: "Копьё", icon: "➤", color: "#a5f0b6",
+      damage: 3, range: 116, cooldown: 0.58, kind: "melee",
+      description: "Длинный выпад, держит врагов на расстоянии."
+    },
+    axe: {
+      name: "Топор", icon: "✦", color: "#ffad69",
+      damage: 6, range: 70, cooldown: 0.78, kind: "melee",
+      description: "Медленный, но очень мощный удар."
+    },
+    wand: {
+      name: "Посох", icon: "✧", color: "#dc9aff",
+      damage: 3, range: 245, cooldown: 0.54, kind: "ranged",
+      description: "Запускает магический снаряд издалека."
+    },
+    bow: {
+      name: "Лук", icon: "➶", color: "#ffe27c",
+      damage: 4, range: 300, cooldown: 0.64, kind: "ranged",
+      description: "Точный дальний выстрел."
+    }
+  };
+
+  const rarities = [
+    { name: "Обычное", color: "#c7d0e8", multiplier: 1 },
+    { name: "Необычное", color: "#64e0a2", multiplier: 1.25 },
+    { name: "Редкое", color: "#69baff", multiplier: 1.6 },
+    { name: "Эпическое", color: "#d18aff", multiplier: 2.05 },
+    { name: "Легендарное", color: "#ffc45e", multiplier: 2.7 }
+  ];
+
+  const state = {
+    hero: null, enemies: [], drops: [], projectiles: [], particles: [], helpers: [],
+    floor: 1, cleared: false, gameOver: false, inventoryOpen: false,
+    selectedItem: 0, message: "", messageTime: 0, bestFloor: 1,
+    joystick: { active: false, id: null, x: 0, y: 0, dx: 0, dy: 0 },
+    attackFlash: 0, shake: 0, streak: 0, streakTime: 0
+  };
+
+  const ui = {
+    stickX: 105, stickY: 508,
+    attackX: 858, attackY: 510,
+    inventoryX: 892, inventoryY: 36,
+    exitX: 480, exitY: 510
+  };
+
+  function makeBackground() {
+    bgCanvas = document.createElement("canvas");
+    bgCanvas.width = W;
+    bgCanvas.height = H;
+    bgCtx = bgCanvas.getContext("2d");
+
+    const g = bgCtx.createLinearGradient(0, 0, W, H);
+    g.addColorStop(0, "#1b2436");
+    g.addColorStop(1, "#151a2a");
+    bgCtx.fillStyle = g;
+    bgCtx.fillRect(0, 0, W, H);
+
+    for (let y = 68; y < H; y += 56) {
+      for (let x = 22; x < W; x += 56) {
+        const alternate = ((x / 56 + y / 56) % 2) === 0;
+        bgCtx.fillStyle = alternate ? "#1b2233" : "#1d2537";
+        bgCtx.fillRect(x, y, 56, 56);
+        bgCtx.strokeStyle = "#283147";
+        bgCtx.lineWidth = 1;
+        bgCtx.strokeRect(x + 0.5, y + 0.5, 55, 55);
+        if ((x + y) % 5 === 0) {
+          bgCtx.fillStyle = "#30394c";
+          bgCtx.fillRect(x + 9, y + 12, 2, 2);
+        }
+      }
+    }
+
+    bgCtx.strokeStyle = "#65718a";
+    bgCtx.lineWidth = 5;
+    bgCtx.strokeRect(22, 66, W - 44, H - 84);
+
+    for (const [x, y] of [[42, 87], [W-42, 87], [42, H-38], [W-42, H-38]]) {
+      bgCtx.fillStyle = "#38435d";
+      bgCtx.beginPath();
+      bgCtx.arc(x, y, 8, 0, Math.PI * 2);
+      bgCtx.fill();
+      bgCtx.fillStyle = "#f2bd68";
+      bgCtx.beginPath();
+      bgCtx.arc(x, y, 3, 0, Math.PI * 2);
+      bgCtx.fill();
+    }
+  }
+
+  function say(text, duration = 2.2) {
+    state.message = text;
+    state.messageTime = duration;
+  }
+
+  function makeWeapon(kind, rarityIndex = null) {
+    if (rarityIndex === null) {
+      const roll = Math.random();
+      rarityIndex = roll < 0.56 ? 0 : roll < 0.82 ? 1 : roll < 0.95 ? 2 : roll < 0.992 ? 3 : 4;
+    }
+    const type = weaponTypes[kind];
+    const rarity = rarities[rarityIndex];
+    return {
+      id: Math.random().toString(36).slice(2) + Date.now().toString(36),
+      kind, rarity: rarityIndex,
+      damage: Math.max(1, Math.round(type.damage * rarity.multiplier))
+    };
+  }
+
+  function newRun() {
+    let best = 1;
+    try { best = Number(localStorage.getItem("towerBestFloor")) || 1; } catch (_) {}
+
+    state.hero = {
+      x: W / 2, y: H / 2, level: 1,
+      hp: 120, maxHp: 120, speed: 220,
+      weapon: makeWeapon("sword", 0), bag: [],
+      cooldown: 0, swing: 0, facing: 0, invulnerable: 0,
+      potions: 0, kills: 0
+    };
+    state.floor = 1;
+    state.bestFloor = best;
+    state.enemies = [];
+    state.drops = [];
+    state.projectiles = [];
+    state.particles = [];
+    state.helpers = [];
+    state.cleared = false;
+    state.gameOver = false;
+    state.inventoryOpen = false;
+    state.streak = 0;
+    state.streakTime = 0;
+    makeFloor();
+    say("Найди врага со своим числом: победи его, чтобы стать сильнее!");
+  }
+
+  function makeFloor() {
+    state.cleared = false;
+    state.enemies = [];
+    const bossFloor = state.floor % 5 === 0;
+    const count = Math.min(7 + Math.floor(state.floor * 1.35), 23);
+
+    for (let i = 0; i < count; i++) {
+      let x, y, attempts = 0;
+      do {
+        x = 75 + Math.random() * (W - 150);
+        y = 115 + Math.random() * (H - 190);
+        attempts++;
+      } while (Math.hypot(x - state.hero.x, y - state.hero.y) < 155 && attempts < 35);
+
+      let value;
+      if (i === 0 || Math.random() < 0.42) {
+        value = state.hero.level;
+      } else {
+        value = Math.max(1, state.hero.level + Math.floor(Math.random() * 7) - 3);
+      }
+
+      const boss = bossFloor && i === count - 1;
+      if (boss) value = state.hero.level + 2 + Math.floor(state.floor / 10);
+
+      const hp = Math.max(2, Math.ceil(value * 1.75 + state.floor * 0.7));
+      state.enemies.push({
+        x, y, value, hp, maxHp: hp,
+        speed: boss ? 35 : 31 + Math.min(value, 25) * 1.25,
+        damage: boss ? 14 + Math.floor(state.floor / 2) : 4 + value * 0.75,
+        boss, hit: 0, touchCooldown: 0, phase: Math.random() * 8
+      });
+    }
+
+    if (bossFloor) say("Босс-этаж! Приготовься к большой битве.", 3);
+  }
+
+  function ensureMatchingEnemy() {
+    if (state.enemies.some(e => e.value === state.hero.level)) return;
+    if (!state.enemies.length) return;
+    const enemy = state.enemies.reduce((a, b) => a.hp < b.hp ? a : b);
+    enemy.value = state.hero.level;
+    enemy.hp = Math.max(2, Math.ceil(enemy.value * 1.75 + state.floor * 0.7));
+    enemy.maxHp = enemy.hp;
+    enemy.boss = false;
+  }
+
+  function addParticle(x, y, color, amount = 6, speed = 90) {
+    for (let i = 0; i < amount && state.particles.length < 150; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const velocity = speed * (0.35 + Math.random() * 0.8);
+      state.particles.push({
+        x, y, vx: Math.cos(angle) * velocity, vy: Math.sin(angle) * velocity,
+        life: 0.25 + Math.random() * 0.38, maxLife: 0.63,
+        size: 2 + Math.random() * 3, color
+      });
+    }
+  }
+
+  function dropLoot(enemy) {
+    if (enemy.boss || Math.random() < 0.30) {
+      const kinds = Object.keys(weaponTypes);
+      let kind = kinds[Math.floor(Math.random() * kinds.length)];
+      if (Math.random() < 0.5) kind = state.hero.weapon.kind;
+      state.drops.push({
+        x: enemy.x, y: enemy.y, type: "weapon",
+        item: makeWeapon(kind, enemy.boss ? 1 + Math.floor(Math.random() * 4) : null),
+        phase: Math.random() * 6
+      });
+    } else if (Math.random() < 0.34) {
+      state.drops.push({ x: enemy.x, y: enemy.y, type: "potion", phase: Math.random() * 6 });
+    } else if (Math.random() < 0.12) {
+      state.drops.push({ x: enemy.x, y: enemy.y, type: "crystal", phase: Math.random() * 6 });
+    }
+  }
+
+  function killEnemy(enemy) {
+    const index = state.enemies.indexOf(enemy);
+    if (index < 0) return;
+
+    state.enemies.splice(index, 1);
+    state.hero.kills++;
+    state.streak++;
+    state.streakTime = 3;
+    addParticle(enemy.x, enemy.y, enemy.boss ? "#db8aff" : "#ff748c", enemy.boss ? 22 : 10, 125);
+    dropLoot(enemy);
+
+    if (enemy.value === state.hero.level) {
+      state.hero.level++;
+      state.hero.maxHp += 6;
+      state.hero.hp = Math.min(state.hero.maxHp, state.hero.hp + 18);
+      say("Число героя выросло до " + state.hero.level + "! Здоровье восстановлено.");
+      ensureMatchingEnemy();
+    } else if (enemy.boss) {
+      say("Босс повержен! Он оставил редкую добычу.");
+    }
+
+    if (state.enemies.length === 0) {
+      state.cleared = true;
+      say("Этаж зачищен! Нажми на портал, чтобы подняться.", 4);
+    }
+  }
+
+  function damageEnemy(enemy, damage, color = "#fff0a6") {
+    if (!state.enemies.includes(enemy)) return;
+    enemy.hp -= damage;
+    enemy.hit = 0.16;
+    addParticle(enemy.x, enemy.y, color, 5, 75);
+    state.shake = Math.min(5, state.shake + 1.2);
+    if (enemy.hp <= 0) killEnemy(enemy);
+  }
+
+  function attack() {
+    if (state.gameOver || state.cleared || state.inventoryOpen) return;
+    const hero = state.hero;
+    if (hero.cooldown > 0) return;
+
+    const weapon = hero.weapon;
+    const type = weaponTypes[weapon.kind];
+    hero.cooldown = type.cooldown;
+    hero.swing = 0.25;
+    state.attackFlash = 0.16;
+
+    let target = null, nearest = type.range;
+    for (const enemy of state.enemies) {
+      const d = Math.hypot(enemy.x - hero.x, enemy.y - hero.y);
+      if (d < nearest) { nearest = d; target = enemy; }
+    }
+
+    if (target) {
+      hero.facing = Math.atan2(target.y - hero.y, target.x - hero.x);
+      if (type.kind === "ranged") {
+        state.projectiles.push({
+          x: hero.x + Math.cos(hero.facing) * 19,
+          y: hero.y + Math.sin(hero.facing) * 19,
+          vx: Math.cos(hero.facing) * (weapon.kind === "bow" ? 470 : 350),
+          vy: Math.sin(hero.facing) * (weapon.kind === "bow" ? 470 : 350),
+          damage: weapon.damage, life: 1.1, color: type.color, kind: weapon.kind
+        });
+      } else {
+        damageEnemy(target, weapon.damage, type.color);
+        if (weapon.kind === "axe" && Math.random() < 0.22 && state.enemies.length) {
+          const second = state.enemies.find(e => e !== target && Math.hypot(e.x - hero.x, e.y - hero.y) < 95);
+          if (second) damageEnemy(second, Math.max(1, Math.floor(weapon.damage / 2)), type.color);
+        }
+      }
+    } else {
+      addParticle(hero.x + Math.cos(hero.facing) * 48, hero.y + Math.sin(hero.facing) * 48,
+        type.color, 3, 45);
+    }
+  }
+
+  function openInventory() {
+    if (!state.gameOver) {
+      state.inventoryOpen = !state.inventoryOpen;
+      state.joystick.active = false;
+      state.joystick.dx = state.joystick.dy = 0;
+    }
+  }
+
+  function inventoryHit(p) {
+    const hero = state.hero;
+    const panel = { x: 130, y: 72, w: 700, h: 462 };
+    if (p.x < panel.x || p.x > panel.x + panel.w || p.y < panel.y || p.y > panel.y + panel.h) {
+      state.inventoryOpen = false;
+      return;
+    }
+
+    if (p.x > 780 && p.y < 125) {
+      state.inventoryOpen = false;
+      return;
+    }
+
+    const gridX = 165, gridY = 183, cardW = 300, cardH = 55, gapX = 18, gapY = 9;
+    for (let i = 0; i < hero.bag.length; i++) {
+      const col = i % 2, row = Math.floor(i / 2);
+      const x = gridX + col * (cardW + gapX);
+      const y = gridY + row * (cardH + gapY);
+      if (p.x >= x && p.x <= x + cardW && p.y >= y && p.y <= y + cardH) {
+        state.selectedItem = i;
+        return;
+      }
+    }
+
+    if (p.y >= 475 && p.y <= 520) {
+      if (p.x < 535) {
+        const item = hero.bag[state.selectedItem];
+        if (!item) { say("Сначала выбери оружие в рюкзаке."); return; }
+        const old = hero.weapon;
+        hero.weapon = item;
+        hero.bag.splice(state.selectedItem, 1);
+        if (hero.bag.length < 8) hero.bag.push(old);
+        else spawnDroppedWeapon(old);
+        state.selectedItem = Math.min(state.selectedItem, hero.bag.length - 1);
+        say("Экипировано: " + weaponTypes[item.kind].name + " — " + rarities[item.rarity].name);
+      } else if (p.x < 690) {
+        const item = hero.bag[state.selectedItem];
+        if (!item) { say("Сначала выбери оружие в рюкзаке."); return; }
+        spawnDroppedWeapon(item);
+        hero.bag.splice(state.selectedItem, 1);
+        state.selectedItem = Math.min(state.selectedItem, hero.bag.length - 1);
+        say("Оружие выброшено рядом с героем.");
+      } else {
+        state.inventoryOpen = false;
+      }
+    }
+  }
+
+  function spawnDroppedWeapon(item) {
+    state.drops.push({
+      x: state.hero.x + (Math.random() - 0.5) * 34,
+      y: state.hero.y + 25 + Math.random() * 16,
+      type: "weapon", item, phase: 0
+    });
+  }
+
+  function pointerDown(e) {
+    e.preventDefault();
+    const p = pointFromEvent(e);
+
+    if (state.gameOver) { newRun(); return; }
+    if (state.inventoryOpen) { inventoryHit(p); return; }
+
+    if (Math.hypot(p.x - ui.inventoryX, p.y - ui.inventoryY) < 34) {
+      openInventory();
+      return;
+    }
+
+    if (state.cleared && Math.hypot(p.x - ui.exitX, p.y - ui.exitY) < 57) {
+      nextFloor();
+      return;
+    }
+
+    if (p.x > 735 && p.y > 405) {
+      attack();
+      return;
+    }
+
+    if (p.x < 270 && p.y > 395) {
+      state.joystick.active = true;
+      state.joystick.id = e.pointerId;
+      state.joystick.x = p.x;
+      state.joystick.y = p.y;
+      updateJoystick(p);
+    }
+  }
+
+  function updateJoystick(p) {
+    let dx = p.x - state.joystick.x;
+    let dy = p.y - state.joystick.y;
+    const length = Math.hypot(dx, dy);
+    const max = 58;
+    if (length > max) { dx *= max / length; dy *= max / length; }
+    state.joystick.dx = dx / max;
+    state.joystick.dy = dy / max;
+  }
+
+  function pointerMove(e) {
+    if (state.joystick.active && state.joystick.id === e.pointerId) {
+      updateJoystick(pointFromEvent(e));
+    }
+  }
+
+  function pointerUp(e) {
+    if (state.joystick.id === e.pointerId) {
+      state.joystick.active = false;
+      state.joystick.id = null;
+      state.joystick.dx = state.joystick.dy = 0;
+    }
+  }
+
+  canvas.addEventListener("pointerdown", pointerDown);
+  canvas.addEventListener("pointermove", pointerMove);
+  canvas.addEventListener("pointerup", pointerUp);
+  canvas.addEventListener("pointercancel", pointerUp);
+  canvas.addEventListener("contextmenu", e => e.preventDefault());
+
+  const keys = {};
+  addEventListener("keydown", e => {
+    const key = e.key.toLowerCase();
+    if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(key)) e.preventDefault();
+    if (key === "i" && !e.repeat) { openInventory(); return; }
+    if (key === " " && !e.repeat) { attack(); return; }
+    keys[key] = true;
+  });
+  addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
+
+  function nextFloor() {
+    state.floor++;
+    state.bestFloor = Math.max(state.bestFloor, state.floor);
+    try { localStorage.setItem("towerBestFloor", String(state.bestFloor)); } catch (_) {}
+    state.hero.x = W / 2;
+    state.hero.y = H / 2;
+    state.hero.hp = Math.min(state.hero.maxHp, state.hero.hp + Math.max(20, Math.floor(state.hero.maxHp * 0.24)));
+    state.projectiles = [];
+    state.drops = [];
+    state.helpers = state.helpers.slice(0, 2);
+    makeFloor();
+    say("Этаж " + state.floor + ". Впереди новые испытания!", 2.7);
+  }
+
+  function update(dt) {
+    if (state.messageTime > 0) state.messageTime -= dt;
+    state.attackFlash = Math.max(0, state.attackFlash - dt);
+    state.shake = Math.max(0, state.shake - dt * 14);
+    state.streakTime -= dt;
+    if (state.streakTime <= 0) state.streak = 0;
+
+    if (state.gameOver || state.inventoryOpen) return;
+
+    const hero = state.hero;
+    hero.cooldown = Math.max(0, hero.cooldown - dt);
+    hero.swing = Math.max(0, hero.swing - dt);
+    hero.invulnerable = Math.max(0, hero.invulnerable - dt);
+
+    let mx = state.joystick.dx, my = state.joystick.dy;
+    if (keys.a || keys.arrowleft) mx -= 1;
+    if (keys.d || keys.arrowright) mx += 1;
+    if (keys.w || keys.arrowup) my -= 1;
+    if (keys.s || keys.arrowdown) my += 1;
+
+    const length = Math.hypot(mx, my);
+    if (length > 0.05) {
+      mx /= length; my /= length;
+      hero.x += mx * hero.speed * dt;
+      hero.y += my * hero.speed * dt;
+      hero.facing = Math.atan2(my, mx);
+    }
+
+    hero.x = Math.max(48, Math.min(W - 48, hero.x));
+    hero.y = Math.max(100, Math.min(H - 47, hero.y));
+
+    for (const enemy of [...state.enemies]) {
+      const dx = hero.x - enemy.x, dy = hero.y - enemy.y;
+      const distance = Math.hypot(dx, dy) || 1;
+      const stopDistance = enemy.boss ? 43 : 34;
+
+      if (distance > stopDistance) {
+        enemy.x += dx / distance * enemy.speed * dt;
+        enemy.y += dy / distance * enemy.speed * dt;
+      } else {
+        enemy.touchCooldown -= dt;
+        if (enemy.touchCooldown <= 0 && hero.invulnerable <= 0) {
+          hero.hp -= enemy.damage;
+          hero.invulnerable = 0.55;
+          enemy.touchCooldown = 0.8;
+          state.shake = 5;
+          addParticle(hero.x, hero.y, "#ff657c", 10, 100);
+          if (hero.hp <= 0) {
+            hero.hp = 0;
+            state.gameOver = true;
+            try { localStorage.setItem("towerBestFloor", String(state.bestFloor)); } catch (_) {}
+          }
+        }
+      }
+      enemy.hit = Math.max(0, enemy.hit - dt);
+      enemy.phase += dt * 2.4;
+    }
+
+    for (let i = state.projectiles.length - 1; i >= 0; i--) {
+      const p = state.projectiles[i];
+      p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt;
+      let hit = false;
+      for (const enemy of [...state.enemies]) {
+        if (Math.hypot(enemy.x - p.x, enemy.y - p.y) < (enemy.boss ? 29 : 21)) {
+          damageEnemy(enemy, p.damage, p.color);
+          addParticle(p.x, p.y, p.color, 5, 75);
+          hit = true;
+          break;
+        }
+      }
+      if (hit || p.life <= 0 || p.x < 20 || p.x > W - 20 || p.y < 70 || p.y > H - 20) {
+        state.projectiles.splice(i, 1);
+      }
+    }
+
+    for (let i = state.drops.length - 1; i >= 0; i--) {
+      const drop = state.drops[i];
+      drop.phase += dt * 3;
+      if (Math.hypot(drop.x - hero.x, drop.y - hero.y) < 34) {
+        if (drop.type === "weapon") {
+          if (hero.bag.length < 8) {
+            hero.bag.push(drop.item);
+            say("В рюкзак добавлено: " + weaponTypes[drop.item.kind].name + ".");
+          } else {
+            say("Рюкзак полон! Открой инвентарь и освободи место.");
+            continue;
+          }
+        } else if (drop.type === "potion") {
+          hero.hp = Math.min(hero.maxHp, hero.hp + 38);
+          say("Зелье восстановило здоровье.");
+          addParticle(hero.x, hero.y, "#ff718d", 12, 95);
+        } else {
+          hero.maxHp += 4;
+          hero.hp = Math.min(hero.maxHp, hero.hp + 8);
+          say("Кристалл жизни: максимум здоровья увеличен!");
+          addParticle(hero.x, hero.y, "#73f0cf", 14, 95);
+        }
+        state.drops.splice(i, 1);
+      }
+    }
+
+    for (let i = state.particles.length - 1; i >= 0; i--) {
+      const p = state.particles[i];
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vx *= 0.96; p.vy *= 0.96; p.life -= dt;
+      if (p.life <= 0) state.particles.splice(i, 1);
+    }
+  }
+
+  // ПРАВКА 2: roundedRect с фолбэком для старых iOS / WebView.
+  function roundedRect(x, y, w, h, r, fill, stroke = null) {
+    ctx.beginPath();
+
+    if (typeof ctx.roundRect === "function") {
+      ctx.roundRect(x, y, w, h, r);
+    } else {
+      r = Math.min(r, w / 2, h / 2);
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
+    ctx.fillStyle = fill;
+    ctx.fill();
+
+    if (stroke) {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  }
+
+  function circle(x, y, r, color) {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+
+  function label(value, x, y, size = 16, color = "#fff", align = "center") {
+    ctx.font = `700 ${size}px system-ui, sans-serif`;
+    ctx.textAlign = align;
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = color;
+    ctx.fillText(value, x, y);
+  }
+
+  function drawWeaponInHand(hero) {
+    const item = hero.weapon;
+    const type = weaponTypes[item.kind];
+    ctx.save();
+    ctx.translate(hero.x, hero.y);
+    ctx.rotate(hero.facing);
+    if (hero.swing > 0) {
+      const progress = 1 - hero.swing / 0.25;
+      ctx.rotate(-0.7 + progress * 1.4);
+    }
+
+    if (item.kind === "spear") {
+      ctx.fillStyle = "#a47651";
+      ctx.fillRect(9, -3, 49, 6);
+      ctx.fillStyle = type.color;
+      ctx.beginPath();
+      ctx.moveTo(58, 0); ctx.lineTo(47, -8); ctx.lineTo(48, 0); ctx.lineTo(47, 8);
+      ctx.closePath(); ctx.fill();
+    } else if (item.kind === "axe") {
+      ctx.fillStyle = "#a47651";
+      ctx.fillRect(9, -3, 36, 6);
+      ctx.fillStyle = type.color;
+      ctx.beginPath();
+      ctx.moveTo(36, -5); ctx.quadraticCurveTo(53, -21, 52, 0);
+      ctx.quadraticCurveTo(53, 21, 36, 5); ctx.closePath(); ctx.fill();
+    } else if (item.kind === "wand") {
+      ctx.strokeStyle = "#8e65b5"; ctx.lineWidth = 6;
+      ctx.beginPath(); ctx.moveTo(11, 5); ctx.lineTo(37, -8); ctx.stroke();
+      circle(39, -9, 6, type.color);
+    } else if (item.kind === "bow") {
+      ctx.strokeStyle = type.color; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(25, 0, 17, -1.15, 1.15); ctx.stroke();
+      ctx.strokeStyle = "#eee4c8"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(31, -15); ctx.lineTo(31, 15); ctx.stroke();
+    } else {
+      ctx.fillStyle = "#8d6745";
+      ctx.fillRect(8, -3, 15, 6);
+      ctx.fillStyle = type.color;
+      ctx.beginPath();
+      ctx.moveTo(19, -4); ctx.lineTo(51, -2); ctx.lineTo(57, 0);
+      ctx.lineTo(51, 2); ctx.lineTo(19, 4); ctx.closePath(); ctx.fill();
+    }
+
+    if (hero.swing > 0 && weaponTypes[item.kind].kind === "melee") {
+      ctx.beginPath();
+      ctx.arc(0, 0, weaponTypes[item.kind].range, -0.7, 0.7);
+      ctx.strokeStyle = type.color + "99";
+      ctx.lineWidth = 5;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawHero() {
+    const h = state.hero;
+    if (h.invulnerable > 0 && Math.floor(performance.now() / 75) % 2 === 0) return;
+
+    circle(h.x, h.y + 16, 20, "#080b1570");
+
+    ctx.fillStyle = "#4b5bdd";
+    ctx.beginPath();
+    ctx.moveTo(h.x - 13, h.y - 3); ctx.lineTo(h.x - 18, h.y + 19);
+    ctx.lineTo(h.x + 17, h.y + 19); ctx.lineTo(h.x + 12, h.y - 4);
+    ctx.closePath(); ctx.fill();
+
+    roundedRect(h.x - 12, h.y + 7, 9, 14, 4, "#d3d8e7");
+    roundedRect(h.x + 3, h.y + 7, 9, 14, 4, "#d3d8e7");
+
+    circle(h.x, h.y + 1, 15, "#78b8ff");
+    roundedRect(h.x - 12, h.y - 5, 24, 18, 7, "#daeaff");
+    roundedRect(h.x - 8, h.y - 1, 16, 9, 4, "#6681ad");
+
+    circle(h.x, h.y - 14, 11, "#f0c39c");
+    ctx.beginPath();
+    ctx.arc(h.x, h.y - 17, 11, Math.PI, Math.PI * 2);
+    ctx.fillStyle = "#493957"; ctx.fill();
+    circle(h.x + 4, h.y - 14, 1.5, "#1d2033");
+
+    roundedRect(h.x - 23, h.y - 47, 46, 24, 9, "#202b4b", "#586997");
+    label(String(h.level), h.x, h.y - 35, 17, "#ffe78a");
+
+    drawWeaponInHand(h);
+  }
+
+  function drawEnemy(e) {
+    const bob = Math.sin(e.phase * 2) * 2;
+    const r = e.boss ? 25 : 17;
+    const bodyColor = e.hit > 0 ? "#ffffff" : e.boss ? "#aa56d6" : "#e25b76";
+
+    circle(e.x, e.y + 11, r + 2, "#080b1570");
+
+    if (e.boss) {
+      ctx.fillStyle = "#ffd16c";
+      ctx.beginPath();
+      ctx.moveTo(e.x - 14, e.y - 12); ctx.lineTo(e.x - 26, e.y - 35);
+      ctx.lineTo(e.x - 5, e.y - 27); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(e.x + 14, e.y - 12); ctx.lineTo(e.x + 26, e.y - 35);
+      ctx.lineTo(e.x + 5, e.y - 27); ctx.fill();
+    }
+
+    circle(e.x, e.y + bob, r, bodyColor);
+    circle(e.x - r * 0.33, e.y - 3 + bob, 3.2, "#fff2cb");
+    circle(e.x + r * 0.33, e.y - 3 + bob, 3.2, "#fff2cb");
+    circle(e.x - r * 0.33, e.y - 3 + bob, 1.5, "#241528");
+    circle(e.x + r * 0.33, e.y - 3 + bob, 1.5, "#241528");
+
+    ctx.strokeStyle = "#63243c"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(e.x, e.y + 5 + bob, 5, 0.15, Math.PI - 0.15); ctx.stroke();
+    ctx.strokeStyle = e.boss ? "#ffc56d" : "#a73955"; ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(e.x - 10, e.y + 12); ctx.lineTo(e.x - 19, e.y + 18);
+    ctx.moveTo(e.x + 10, e.y + 12); ctx.lineTo(e.x + 19, e.y + 18);
+    ctx.stroke();
+
+    roundedRect(e.x - 21, e.y - r - 31, 42, 22, 8, e.boss ? "#512967" : "#492432");
+    label(String(e.value), e.x, e.y - r - 20, 15,
+      e.value === state.hero.level ? "#ffe78a" : "#fff");
+
+    const barW = e.boss ? 52 : 36;
+    ctx.fillStyle = "#34202c";
+    ctx.fillRect(e.x - barW / 2, e.y + r + 6, barW, 5);
+    ctx.fillStyle = e.boss ? "#d98aff" : "#ff7a8e";
+    ctx.fillRect(e.x - barW / 2, e.y + r + 6, barW * Math.max(0, e.hp / e.maxHp), 5);
+  }
+
+  function drawDrop(drop) {
+    const bob = Math.sin(drop.phase) * 5;
+    const y = drop.y + bob;
+    circle(drop.x, y + 5, 14, "#080b1570");
+
+    if (drop.type === "weapon") {
+      const type = weaponTypes[drop.item.kind];
+      const rarity = rarities[drop.item.rarity];
+      circle(drop.x, y, 13, rarity.color);
+      circle(drop.x, y, 9, "#202438");
+      label(type.icon, drop.x, y, 14, type.color);
+    } else if (drop.type === "potion") {
+      circle(drop.x, y, 12, "#ff6c88");
+      roundedRect(drop.x - 4, y - 8, 8, 4, 1, "#ffe4a0");
+      roundedRect(drop.x - 3, y - 2, 6, 10, 2, "#fff1ee");
+      ctx.fillStyle = "#ff6582"; ctx.fillRect(drop.x - 2, y + 2, 4, 5);
+    } else {
+      circle(drop.x, y, 12, "#61eac8");
+      ctx.save(); ctx.translate(drop.x, y); ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = "#c7fff0"; ctx.fillRect(-6, -6, 12, 12);
+      ctx.restore();
+    }
+  }
+
+  function drawProjectile(p) {
+    circle(p.x, p.y, p.kind === "bow" ? 5 : 8, p.color);
+    circle(p.x, p.y, p.kind === "bow" ? 2 : 4, "#ffffff");
+  }
+
+  function drawTopBar() {
+    ctx.fillStyle = "#101626";
+    ctx.fillRect(0, 0, W, 65);
+
+    label("ЭТАЖ " + state.floor + (state.floor % 5 === 0 ? "  ·  БОСС" : ""),
+      24, 18, 15, "#d5ddff", "left");
+    label("⚔ " + state.hero.weapon.damage, 24, 44, 14, "#ffd474", "left");
+
+    const h = state.hero;
+    label("♥ " + Math.ceil(h.hp) + " / " + h.maxHp, 165, 22, 14, "#ff9eaf", "left");
+    roundedRect(165, 37, 154, 9, 5, "#412834");
+    roundedRect(165, 37, 154 * Math.max(0, h.hp / h.maxHp), 5, 3, "#ff627e");
+
+    label("УБИЙСТВ: " + h.kills, 345, 23, 13, "#c4d1ee", "left");
+    label("ЛУЧШИЙ ЭТАЖ: " + state.bestFloor, 485, 23, 13, "#aeb9d8", "left");
+    label("ВРАГОВ: " + state.enemies.length, W - 74, 23, 13, "#d7def2", "right");
+
+    circle(ui.inventoryX, ui.inventoryY, 25, "#35415e");
+    circle(ui.inventoryX, ui.inventoryY, 20, "#536585");
+    label("▣", ui.inventoryX, ui.inventoryY, 20, "#fff3c2");
+    if (h.bag.length) {
+      circle(ui.inventoryX + 18, ui.inventoryY - 16, 10, "#e76581");
+      label(String(h.bag.length), ui.inventoryX + 18, ui.inventoryY - 16, 11, "#fff");
+    }
+  }
+
+  function drawControls() {
+    circle(ui.stickX, ui.stickY, 49, "#e1e8ff20");
+    circle(ui.stickX, ui.stickY, 31, "#d7e2ff12");
+    const sx = state.joystick.active
+      ? state.joystick.x + state.joystick.dx * 58 : ui.stickX;
+    const sy = state.joystick.active
+      ? state.joystick.y + state.joystick.dy * 58 : ui.stickY;
+    circle(sx, sy, 22, "#cedaff9c");
+    label("ДВИЖЕНИЕ", ui.stickX, ui.stickY + 66, 10, "#cbd5ef");
+
+    circle(ui.attackX, ui.attackY, 56, "#9f3d57");
+    circle(ui.attackX, ui.attackY, 47, "#e15d78");
+    label(weaponTypes[state.hero.weapon.kind].icon, ui.attackX, ui.attackY - 4, 27, "#fff3d5");
+    label("УДАР", ui.attackX, ui.attackY + 30, 11, "#fff");
+
+    if (state.cleared) {
+      circle(ui.exitX, ui.exitY, 40, "#6146b5");
+      circle(ui.exitX, ui.exitY, 31, "#9475ef");
+      label("↑", ui.exitX, ui.exitY - 2, 29, "#fff");
+      label("НАВЕРХ", ui.exitX, ui.exitY + 47, 11, "#ded3ff");
+    }
+
+    if (state.streak > 1 && state.streakTime > 0) {
+      roundedRect(W / 2 - 72, 76, 144, 30, 12, "#5a3548");
+      label("СЕРИЯ ×" + state.streak, W / 2, 91, 14, "#ffd76c");
+    }
+  }
+
+  function drawMessage() {
+    if (state.messageTime <= 0) return;
+    roundedRect(W / 2 - 268, 112, 536, 34, 12, "#0b1023dd");
+    label(state.message, W / 2, 129, 13, "#fff");
+  }
+
+  function drawInventory() {
+    ctx.fillStyle = "#080c18bb";
+    ctx.fillRect(0, 0, W, H);
+
+    const x = 130, y = 72, w = 700, h = 462;
+    roundedRect(x, y, w, h, 20, "#202a40", "#647498");
+    label("РЮКЗАК И СНАРЯЖЕНИЕ", x + 28, y + 28, 20, "#fff0b4", "left");
+    label("×", x + w - 29, y + 29, 25, "#ffd2d9");
+    label("Экипировано:", x + 30, y + 77, 13, "#aebcdd", "left");
+
+    const equipped = state.hero.weapon;
+    const equippedType = weaponTypes[equipped.kind];
+    const equippedRarity = rarities[equipped.rarity];
+    roundedRect(x + 155, y + 56, 510, 48, 12, "#2d3a55", equippedRarity.color);
+    label(equippedType.icon, x + 178, y + 80, 20, equippedType.color);
+    label(equippedRarity.name + " " + equippedType.name + "  ·  Урон " + equipped.damage,
+      x + 204, y + 80, 14, equippedRarity.color, "left");
+
+    label("РЮКЗАК  " + state.hero.bag.length + " / 8", x + 30, y + 128, 13, "#aebcdd", "left");
+
+    const gridX = 165, gridY = 183, cardW = 300, cardH = 55, gapX = 18, gapY = 9;
+    for (let i = 0; i < 8; i++) {
+      const col = i % 2, row = Math.floor(i / 2);
+      const cx = gridX + col * (cardW + gapX);
+      const cy = gridY + row * (cardH + gapY);
+      const item = state.hero.bag[i];
+
+      if (!item) {
+        roundedRect(cx, cy, cardW, cardH, 10, "#1b2335", "#35415a");
+        label("Пусто", cx + 18, cy + cardH / 2, 12, "#697792", "left");
+        continue;
+      }
+
+      const selected = i === state.selectedItem;
+      const type = weaponTypes[item.kind];
+      const rarity = rarities[item.rarity];
+      roundedRect(cx, cy, cardW, cardH, 10,
+        selected ? "#3b4965" : "#29344b",
+        selected ? "#ffe28a" : rarity.color);
+      label(type.icon, cx + 25, cy + 27, 20, type.color);
+      label(rarity.name + " " + type.name, cx + 48, cy + 18, 12, rarity.color, "left");
+      label("Урон " + item.damage + "  ·  " + (type.kind === "ranged" ? "дальний бой" : "ближний бой"),
+        cx + 48, cy + 39, 11, "#c4cce0", "left");
+    }
+
+    const selectedItem = state.hero.bag[state.selectedItem];
+    if (selectedItem) {
+      const type = weaponTypes[selectedItem.kind];
+      label(type.description, x + 30, y + 399, 12, "#c7d3ed", "left");
+    } else {
+      label("Подбирай оружие и выбирай стиль боя.", x + 30, y + 399, 12, "#c7d3ed", "left");
+    }
+
+    roundedRect(x + 30, y + 420, 220, 32, 9, "#587a53");
+    label("НАДЕТЬ", x + 140, y + 436, 12, "#efffe5");
+    roundedRect(x + 265, y + 420, 190, 32, 9, "#93485a");
+    label("ВЫБРОСИТЬ", x + 360, y + 436, 12, "#ffe7e8");
+    roundedRect(x + 470, y + 420, 195, 32, 9, "#465675");
+    label("ЗАКРЫТЬ", x + 567, y + 436, 12, "#fff");
+  }
+
+  function drawGameOver() {
+    ctx.fillStyle = "#090d19dd";
+    ctx.fillRect(0, 0, W, H);
+    label("ПОХОД ОКОНЧЕН", W / 2, H / 2 - 48, 34, "#ff778b");
+    label("Ты достиг этажа " + state.floor + " и победил " + state.hero.kills + " врагов.",
+      W / 2, H / 2, 16, "#e1e7f7");
+    label("Нажми на экран, чтобы начать новый поход", W / 2, H / 2 + 38, 14, "#fff0bd");
+  }
+
+  function draw() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = "#111626";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+
+    const shakeX = state.shake ? (Math.random() - 0.5) * state.shake : 0;
+    const shakeY = state.shake ? (Math.random() - 0.5) * state.shake : 0;
+    ctx.save();
+    ctx.translate(shakeX, shakeY);
+
+    ctx.drawImage(bgCanvas, 0, 0);
+    drawTopBar();
+
+    for (const drop of state.drops) drawDrop(drop);
+    for (const enemy of state.enemies) drawEnemy(enemy);
+    for (const p of state.projectiles) drawProjectile(p);
+
+    for (const p of state.particles) {
+      ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+      circle(p.x, p.y, p.size, p.color);
+    }
+    ctx.globalAlpha = 1;
+
+    drawHero();
+    drawControls();
+    drawMessage();
+
+    if (state.inventoryOpen) drawInventory();
+    if (state.gameOver) drawGameOver();
+
+    ctx.restore();
+  }
+
+  let lastTime = performance.now();
+  function frame(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.04);
+    lastTime = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  // ПРАВКА 3: устойчивый ресайз при повороте устройства.
+  addEventListener("resize", () => requestAnimationFrame(resize));
+  addEventListener("orientationchange", () => {
+    setTimeout(resize, 250);
+  });
+  resize();
+  newRun();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
